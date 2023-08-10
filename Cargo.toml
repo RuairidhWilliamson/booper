@@ -1,0 +1,11 @@
+[package]
+name = "booper"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.3.2", features = ["derive"] }
+dialoguer = "0.10.4"
+regex = "1.8.4"
+semver = "1.0.17"
+
