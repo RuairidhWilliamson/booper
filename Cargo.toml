@@ -2,6 +2,7 @@
 name = "booper"
 version = "0.1.0"
 edition = "2021"
+description = "Increments project version numbers and releases them"
 
 [dependencies]
 clap = { version = "4.3.2", features = ["derive"] }

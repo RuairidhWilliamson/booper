@@ -1,5 +1,17 @@
 #![warn(missing_docs)]
 
+//! Booper is a cli tool to increment version numbers for projects commit them, tag a release and push it using git.
+//!
+//! The main use case is that you have a project that you want to release a new version this involves changing the Cargo.toml version number.
+//! Running `cargo check` to update the Cargo.lock file and incrementing any other places the version is mentioned.
+//! Committing this as a new change, tagging it and pushing it.
+//!
+//! Booper simplifies this into one simple command `booper -ctp` or `booper -ctp minor`
+//!
+//! Booper will search for versions in common places and ask if you want to increment them.
+//!
+//! Currently booper only checks `Cargo.toml` and `.env` but this is likely to expand in the future.
+
 use std::{path::Path, str::FromStr};
 
 use clap::Parser;
@@ -12,15 +24,27 @@ fn main() {
 }
 
 #[derive(Parser)]
-#[command(author, version, about)]
+#[command(version, about)]
 struct Cli {
     /// Can be one of `patch`, `minor`, `major` or an exact version e.g. `1.0.3`
     #[arg(default_value = "patch")]
     increment: VersionIncrement,
+
+    /// Whether or not to commit the version changes
     #[arg(short, long)]
     commit: bool,
+
+    /// Whether or not to tag the commit. Requires -c / --commit
     #[arg(short, long)]
     tag: bool,
+
+    /// Whether or not to push the commit and tag. Requires -c / --commit
+    #[arg(short, long)]
+    push: bool,
+
+    /// Skips the interactive confirm step
+    #[arg(short = 'y', long)]
+    force: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,17 +114,38 @@ impl Cli {
             panic!("no consistent version found: {versions:?}");
         }
         let from_version = semver::Version::parse(&versions[0]).unwrap();
+        let last_tag = get_last_tag();
+        if !last_tag.is_empty() && from_version != semver::Version::parse(&last_tag).unwrap() {
+            panic!("last git tag does not match the detected tag");
+        }
         let to_version = self.increment.increment(&from_version);
 
         println!("Upgrading version {from_version} to {to_version}");
-        println!("The following files will be changed:");
+        let mut ops = Vec::new();
+        if self.commit {
+            ops.push("committed");
+            if self.tag {
+                ops.push("tagged");
+            }
+            if self.push {
+                ops.push("pushed");
+            }
+        }
+        let ops_display;
+        if let Some(last) = ops.pop() {
+            ops_display = ops.iter().map(|x| format!(", {x}")).collect::<String>() + " and " + last;
+        } else {
+            ops_display = String::new();
+        }
+        println!("The following files will be changed{}:", ops_display);
         for file in &matching_files {
             println!("\t{}", file.display());
         }
-        if !dialoguer::Confirm::new()
-            .with_prompt("Do you want to continue?")
-            .interact()
-            .unwrap()
+        if !self.force
+            && !dialoguer::Confirm::new()
+                .with_prompt("Do you want to continue?")
+                .interact()
+                .unwrap()
         {
             return;
         }
@@ -120,11 +165,22 @@ impl Cli {
             let v = to_version.to_string();
             let msg = format!("Version {}", v);
             commit(&msg);
-            push();
+            if self.push {
+                push();
+            }
 
             if self.tag {
                 tag(&v);
-                push_tags();
+                if self.push {
+                    push_tags();
+                }
+            }
+        } else {
+            if self.tag {
+                println!("Can't tag when -c / --commit is not enabled");
+            }
+            if self.push {
+                println!("Can't push when -c / --commit is not enabled")
             }
         }
     }
@@ -189,4 +245,13 @@ fn push_tags() {
         .status()
         .unwrap()
         .success());
+}
+
+fn get_last_tag() -> String {
+    let cmd = std::process::Command::new("git")
+        .args(["describe", "--tags", "--abbrev=0"])
+        .output()
+        .unwrap();
+    assert!(cmd.status.success());
+    String::from_utf8(cmd.stdout).unwrap().trim().to_owned()
 }
