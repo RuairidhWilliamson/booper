@@ -116,18 +116,24 @@ impl Cli {
         }
         let from_version = semver::Version::parse(&versions[0]).unwrap();
         let last_tag = get_last_tag();
-        let stripped_last_tag = last_tag.strip_prefix("v").unwrap_or(&last_tag);
-        if !stripped_last_tag.is_empty()
-            && from_version != semver::Version::parse(stripped_last_tag).unwrap()
-        {
-            panic!("last git tag does not match the detected tag");
+        if let Some(last_tag) = &last_tag {
+            let stripped_last_tag = last_tag.strip_prefix("v").unwrap_or(last_tag);
+            if !stripped_last_tag.is_empty()
+                && from_version != semver::Version::parse(stripped_last_tag).unwrap()
+            {
+                panic!("last git tag does not match the detected tag");
+            }
         }
         let to_version = self.increment.increment(&from_version);
-        let to_version_tag = if last_tag.starts_with("v") {
-            format!("v{to_version}")
-        } else {
-            to_version.to_string()
-        };
+        let to_version_tag = last_tag
+            .map(|last_tag| {
+                if last_tag.starts_with("v") {
+                    format!("v{to_version}")
+                } else {
+                    to_version.to_string()
+                }
+            })
+            .unwrap_or_else(|| format!("v{to_version}"));
 
         println!("Upgrading version {from_version} to {to_version}");
         let mut ops = Vec::new();
@@ -269,14 +275,14 @@ fn push_tags() {
         .success());
 }
 
-fn get_last_tag() -> String {
+fn get_last_tag() -> Option<String> {
     let cmd = std::process::Command::new("git")
         .args(["describe", "--tags", "--abbrev=0"])
         .output()
         .unwrap();
-    assert!(
-        cmd.status.success(),
-        "no tags found in this history of the current branch"
-    );
-    String::from_utf8(cmd.stdout).unwrap().trim().to_owned()
+    if cmd.status.success() {
+        Some(String::from_utf8(cmd.stdout).unwrap().trim().to_owned())
+    } else {
+        None
+    }
 }
