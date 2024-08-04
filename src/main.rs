@@ -12,6 +12,7 @@
 //!
 //! Currently booper only checks `Cargo.toml` and `.env` but this is likely to expand in the future.
 
+use std::fmt::Write as _;
 use std::{path::Path, str::FromStr};
 
 use clap::Parser;
@@ -115,10 +116,18 @@ impl Cli {
         }
         let from_version = semver::Version::parse(&versions[0]).unwrap();
         let last_tag = get_last_tag();
-        if !last_tag.is_empty() && from_version != semver::Version::parse(&last_tag).unwrap() {
+        let stripped_last_tag = last_tag.strip_prefix("v").unwrap_or(&last_tag);
+        if !stripped_last_tag.is_empty()
+            && from_version != semver::Version::parse(stripped_last_tag).unwrap()
+        {
             panic!("last git tag does not match the detected tag");
         }
         let to_version = self.increment.increment(&from_version);
+        let to_version_tag = if last_tag.starts_with("v") {
+            format!("v{to_version}")
+        } else {
+            to_version.to_string()
+        };
 
         println!("Upgrading version {from_version} to {to_version}");
         let mut ops = Vec::new();
@@ -133,7 +142,11 @@ impl Cli {
         }
         let ops_display;
         if let Some(last) = ops.pop() {
-            ops_display = ops.iter().map(|x| format!(", {x}")).collect::<String>() + " and " + last;
+            ops_display = ops.iter().fold(String::new(), |mut output, x| {
+                let _ = write!(output, ", {x}");
+                output
+            }) + " and "
+                + last;
         } else {
             ops_display = String::new();
         }
@@ -170,9 +183,9 @@ impl Cli {
             }
 
             if self.tag {
-                tag(&v);
+                tag(&to_version_tag);
                 if self.push {
-                    push_tags();
+                    push_tag(&to_version_tag);
                 }
             }
         } else {
@@ -187,7 +200,7 @@ impl Cli {
 }
 
 fn all_equal(v: &[String]) -> bool {
-    let first = v.get(0);
+    let first = v.first();
     if first.is_none() {
         return false;
     }
@@ -239,6 +252,15 @@ fn tag(tag: &str) {
         .success());
 }
 
+fn push_tag(tag: &str) {
+    assert!(std::process::Command::new("git")
+        .args(["push", "origin", tag])
+        .status()
+        .unwrap()
+        .success());
+}
+
+#[allow(dead_code)]
 fn push_tags() {
     assert!(std::process::Command::new("git")
         .args(["push", "--tags"])
@@ -252,6 +274,9 @@ fn get_last_tag() -> String {
         .args(["describe", "--tags", "--abbrev=0"])
         .output()
         .unwrap();
-    assert!(cmd.status.success());
+    assert!(
+        cmd.status.success(),
+        "no tags found in this history of the current branch"
+    );
     String::from_utf8(cmd.stdout).unwrap().trim().to_owned()
 }

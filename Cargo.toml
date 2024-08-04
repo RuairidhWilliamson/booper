@@ -6,7 +6,7 @@ description = "Increments project version numbers and releases them"
 
 [dependencies]
 clap = { version = "4.3.2", features = ["derive"] }
-dialoguer = "0.10.4"
+dialoguer = "0.11.0"
 regex = "1.8.4"
 semver = "1.0.17"
 
