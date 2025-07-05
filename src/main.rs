@@ -27,7 +27,7 @@ fn main() {
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
-    /// Can be one of `patch`, `minor`, `major`, `strip` or an exact version e.g. `1.0.3`
+    /// Can be one of `patch`, `minor`, `major`, `strip`, `pre` or an exact version e.g. `1.0.3`
     ///
     /// Defaults to `patch` or `strip` for prerelease
     #[arg(default_value = "auto")]
@@ -57,6 +57,7 @@ enum VersionIncrement {
     Minor,
     Major,
     StripPrerelease,
+    Prerelease,
     Exact(Version),
 }
 
@@ -70,6 +71,7 @@ impl FromStr for VersionIncrement {
             "minor" => Self::Minor,
             "major" => Self::Major,
             "strip" => Self::StripPrerelease,
+            "pre" => Self::Prerelease,
             _ => Self::Exact(Version::from_str(s)?),
         })
     }
@@ -94,14 +96,18 @@ impl VersionIncrement {
                 minor: current.minor + 1,
                 ..current.clone()
             },
-            Self::StripPrerelease => Version {
-                pre: semver::Prerelease::default(),
-                ..current.clone()
-            },
             Self::Major => Version {
                 patch: 0,
                 minor: 0,
                 major: current.major + 1,
+                ..current.clone()
+            },
+            Self::StripPrerelease => Version {
+                pre: semver::Prerelease::default(),
+                ..current.clone()
+            },
+            Self::Prerelease => Version {
+                pre: semver::Prerelease::new("pre").unwrap(),
                 ..current.clone()
             },
             Self::Exact(version) => version.clone(),
