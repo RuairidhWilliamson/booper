@@ -27,8 +27,10 @@ fn main() {
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
-    /// Can be one of `patch`, `minor`, `major` or an exact version e.g. `1.0.3`
-    #[arg(default_value = "patch")]
+    /// Can be one of `patch`, `minor`, `major`, `strip` or an exact version e.g. `1.0.3`
+    ///
+    /// Defaults to `patch` or `strip` for prerelease
+    #[arg(default_value = "auto")]
     increment: VersionIncrement,
 
     /// Whether or not to commit the version changes
@@ -50,9 +52,11 @@ struct Cli {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum VersionIncrement {
+    Auto,
     Patch,
     Minor,
     Major,
+    StripPrerelease,
     Exact(Version),
 }
 
@@ -61,9 +65,11 @@ impl FromStr for VersionIncrement {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.to_lowercase().as_ref() {
+            "auto" => Self::Auto,
             "patch" => Self::Patch,
             "minor" => Self::Minor,
             "major" => Self::Major,
+            "strip" => Self::StripPrerelease,
             _ => Self::Exact(Version::from_str(s)?),
         })
     }
@@ -72,6 +78,13 @@ impl FromStr for VersionIncrement {
 impl VersionIncrement {
     fn increment(&self, current: &Version) -> Version {
         match self {
+            Self::Auto => {
+                if current.pre.is_empty() {
+                    Self::Patch.increment(current)
+                } else {
+                    Self::StripPrerelease.increment(current)
+                }
+            }
             Self::Patch => Version {
                 patch: current.patch + 1,
                 ..current.clone()
@@ -79,6 +92,10 @@ impl VersionIncrement {
             Self::Minor => Version {
                 patch: 0,
                 minor: current.minor + 1,
+                ..current.clone()
+            },
+            Self::StripPrerelease => Version {
+                pre: semver::Prerelease::default(),
                 ..current.clone()
             },
             Self::Major => Version {
@@ -95,7 +112,7 @@ impl VersionIncrement {
 impl Cli {
     #[expect(clippy::too_many_lines)]
     fn boop(&self) {
-        assert!(check_git_clean(), "Uncommitted git changes");
+        assert_git_clean();
         let re = Regex::new("((VERSION|version) ?= ?)\"([^\"]+)\"").unwrap();
         let files = ["Cargo.toml", ".env"];
         let (matching_files, versions): (Vec<&'static Path>, Vec<String>) = files
@@ -113,17 +130,16 @@ impl Cli {
             "no consistent version found: {versions:?}"
         );
         let from_version = semver::Version::parse(&versions[0]).unwrap();
-        assert!(from_version.pre.is_empty());
-        assert!(from_version.build.is_empty());
         let last_tag = get_last_tag();
         if let Some(last_tag) = &last_tag {
-            let stripped_last_tag = last_tag.strip_prefix("v").unwrap_or(last_tag);
+            let stripped_last_tag = last_tag.strip_prefix('v').unwrap_or(last_tag);
             if !stripped_last_tag.is_empty()
                 && from_version != semver::Version::parse(stripped_last_tag).unwrap()
             {
                 panic!("last git tag does not match the detected tag");
             }
         }
+        assert!(from_version.build.is_empty(), "build suffix unsupported");
         let to_version = self.increment.increment(&from_version);
         let to_version_tag = last_tag
             .map(|last_tag| {
@@ -223,16 +239,20 @@ fn cargo_check() {
             .args(["check", "-q"])
             .status()
             .unwrap()
-            .success()
+            .success(),
+        "cargo check failed"
     );
 }
 
-fn check_git_clean() -> bool {
-    std::process::Command::new("git")
-        .args(["diff", "--cached", "--exit-code"])
-        .status()
-        .unwrap()
-        .success()
+fn assert_git_clean() {
+    assert!(
+        std::process::Command::new("git")
+            .args(["diff", "--cached", "--exit-code"])
+            .status()
+            .unwrap()
+            .success(),
+        "uncommitted changes",
+    );
 }
 
 fn commit(message: &str) {
@@ -241,7 +261,8 @@ fn commit(message: &str) {
             .args(["commit", "-am", message])
             .status()
             .unwrap()
-            .success()
+            .success(),
+        "commit failed"
     );
 }
 
@@ -251,7 +272,8 @@ fn push() {
             .args(["push"])
             .status()
             .unwrap()
-            .success()
+            .success(),
+        "push failed"
     );
 }
 
@@ -261,7 +283,8 @@ fn tag(tag: &str) {
             .args(["tag", tag])
             .status()
             .unwrap()
-            .success()
+            .success(),
+        "tag failed"
     );
 }
 
@@ -271,7 +294,8 @@ fn push_tag(tag: &str) {
             .args(["push", "origin", tag])
             .status()
             .unwrap()
-            .success()
+            .success(),
+        "push tag failed"
     );
 }
 
