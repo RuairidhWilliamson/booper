@@ -94,9 +94,7 @@ impl VersionIncrement {
 
 impl Cli {
     fn boop(&self) {
-        if !check_git_clean() {
-            panic!("Uncommitted git changes");
-        }
+        assert!(check_git_clean(), "Uncommitted git changes");
         let re = Regex::new("((VERSION|version) ?= ?)\"([^\"]+)\"").unwrap();
         let files = ["Cargo.toml", ".env"];
         let (matching_files, versions): (Vec<&'static Path>, Vec<String>) = files
@@ -108,12 +106,11 @@ impl Cli {
                 Some((file, cap.get(3)?.as_str().to_owned()))
             })
             .unzip();
-        if versions.is_empty() {
-            panic!("no versions found");
-        }
-        if !all_equal(&versions) {
-            panic!("no consistent version found: {versions:?}");
-        }
+        assert!(!versions.is_empty(), "no versions found");
+        assert!(
+            all_equal(&versions),
+            "no consistent version found: {versions:?}"
+        );
         let from_version = semver::Version::parse(&versions[0]).unwrap();
         let last_tag = get_last_tag();
         if let Some(last_tag) = &last_tag {
@@ -127,7 +124,7 @@ impl Cli {
         let to_version = self.increment.increment(&from_version);
         let to_version_tag = last_tag
             .map(|last_tag| {
-                if last_tag.starts_with("v") {
+                if last_tag.starts_with('v') {
                     format!("v{to_version}")
                 } else {
                     to_version.to_string()
@@ -169,13 +166,13 @@ impl Cli {
             return;
         }
 
-        matching_files.into_iter().for_each(|file| {
+        for file in matching_files {
             let contents = std::fs::read_to_string(file).unwrap();
             let replaced_contents = re.replace(&contents, |caps: &Captures| {
                 format!("{}\"{}\"", &caps[1], to_version)
             });
             std::fs::write(file, replaced_contents.as_ref()).unwrap();
-        });
+        }
 
         cargo_check();
         println!("Upgraded!");
@@ -198,7 +195,7 @@ impl Cli {
                 println!("Can't tag when -c / --commit is not enabled");
             }
             if self.push {
-                println!("Can't push when -c / --commit is not enabled")
+                println!("Can't push when -c / --commit is not enabled");
             }
         }
     }
@@ -269,17 +266,6 @@ fn push_tag(tag: &str) {
     assert!(
         std::process::Command::new("git")
             .args(["push", "origin", tag])
-            .status()
-            .unwrap()
-            .success()
-    );
-}
-
-#[allow(dead_code)]
-fn push_tags() {
-    assert!(
-        std::process::Command::new("git")
-            .args(["push", "--tags"])
             .status()
             .unwrap()
             .success()
