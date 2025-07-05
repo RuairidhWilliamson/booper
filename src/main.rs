@@ -156,7 +156,7 @@ impl Cli {
         } else {
             ops_display = String::new();
         }
-        println!("The following files will be changed{}:", ops_display);
+        println!("The following files will be changed{ops_display}:");
         for file in &matching_files {
             println!("\t{}", file.display());
         }
@@ -181,8 +181,7 @@ impl Cli {
         println!("Upgraded!");
 
         if self.commit {
-            let v = to_version.to_string();
-            let msg = format!("Version {}", v);
+            let msg = format!("Version {to_version}");
             commit(&msg);
             if self.push {
                 push();
@@ -219,11 +218,13 @@ fn all_equal(v: &[String]) -> bool {
 }
 
 fn cargo_check() {
-    assert!(std::process::Command::new("cargo")
-        .args(["check", "-q"])
-        .status()
-        .unwrap()
-        .success());
+    assert!(
+        std::process::Command::new("cargo")
+            .args(["check", "-q"])
+            .status()
+            .unwrap()
+            .success()
+    );
 }
 
 fn check_git_clean() -> bool {
@@ -235,44 +236,54 @@ fn check_git_clean() -> bool {
 }
 
 fn commit(message: &str) {
-    assert!(std::process::Command::new("git")
-        .args(["commit", "-am", message])
-        .status()
-        .unwrap()
-        .success());
+    assert!(
+        std::process::Command::new("git")
+            .args(["commit", "-am", message])
+            .status()
+            .unwrap()
+            .success()
+    );
 }
 
 fn push() {
-    assert!(std::process::Command::new("git")
-        .args(["push"])
-        .status()
-        .unwrap()
-        .success());
+    assert!(
+        std::process::Command::new("git")
+            .args(["push"])
+            .status()
+            .unwrap()
+            .success()
+    );
 }
 
 fn tag(tag: &str) {
-    assert!(std::process::Command::new("git")
-        .args(["tag", tag])
-        .status()
-        .unwrap()
-        .success());
+    assert!(
+        std::process::Command::new("git")
+            .args(["tag", tag])
+            .status()
+            .unwrap()
+            .success()
+    );
 }
 
 fn push_tag(tag: &str) {
-    assert!(std::process::Command::new("git")
-        .args(["push", "origin", tag])
-        .status()
-        .unwrap()
-        .success());
+    assert!(
+        std::process::Command::new("git")
+            .args(["push", "origin", tag])
+            .status()
+            .unwrap()
+            .success()
+    );
 }
 
 #[allow(dead_code)]
 fn push_tags() {
-    assert!(std::process::Command::new("git")
-        .args(["push", "--tags"])
-        .status()
-        .unwrap()
-        .success());
+    assert!(
+        std::process::Command::new("git")
+            .args(["push", "--tags"])
+            .status()
+            .unwrap()
+            .success()
+    );
 }
 
 fn get_last_tag() -> Option<String> {
