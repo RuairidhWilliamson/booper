@@ -93,6 +93,7 @@ impl VersionIncrement {
 }
 
 impl Cli {
+    #[expect(clippy::too_many_lines)]
     fn boop(&self) {
         assert!(check_git_clean(), "Uncommitted git changes");
         let re = Regex::new("((VERSION|version) ?= ?)\"([^\"]+)\"").unwrap();
@@ -112,6 +113,8 @@ impl Cli {
             "no consistent version found: {versions:?}"
         );
         let from_version = semver::Version::parse(&versions[0]).unwrap();
+        assert!(from_version.pre.is_empty());
+        assert!(from_version.build.is_empty());
         let last_tag = get_last_tag();
         if let Some(last_tag) = &last_tag {
             let stripped_last_tag = last_tag.strip_prefix("v").unwrap_or(last_tag);
@@ -132,7 +135,7 @@ impl Cli {
             })
             .unwrap_or_else(|| format!("v{to_version}"));
 
-        println!("Upgrading version {from_version} to {to_version}");
+        eprintln!("Upgrading version {from_version} to {to_version}");
         let mut ops = Vec::new();
         if self.commit {
             ops.push("committed");
@@ -153,9 +156,9 @@ impl Cli {
         } else {
             ops_display = String::new();
         }
-        println!("The following files will be changed{ops_display}:");
+        eprintln!("The following files will be changed{ops_display}:");
         for file in &matching_files {
-            println!("\t{}", file.display());
+            eprintln!("\t{}", file.display());
         }
         if !self.force
             && !dialoguer::Confirm::new()
@@ -175,7 +178,7 @@ impl Cli {
         }
 
         cargo_check();
-        println!("Upgraded!");
+        eprintln!("Upgraded!");
 
         if self.commit {
             let msg = format!("Version {to_version}");
@@ -192,10 +195,10 @@ impl Cli {
             }
         } else {
             if self.tag {
-                println!("Can't tag when -c / --commit is not enabled");
+                eprintln!("Can't tag when -c / --commit is not enabled");
             }
             if self.push {
-                println!("Can't push when -c / --commit is not enabled");
+                eprintln!("Can't push when -c / --commit is not enabled");
             }
         }
     }
