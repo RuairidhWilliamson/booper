@@ -140,6 +140,7 @@ impl Cli {
         if let Some(last_tag) = &last_tag {
             let stripped_last_tag = last_tag.strip_prefix('v').unwrap_or(last_tag);
             if !stripped_last_tag.is_empty()
+                && from_version.pre.is_empty()
                 && from_version != semver::Version::parse(stripped_last_tag).unwrap()
             {
                 panic!("last git tag does not match the detected tag");
@@ -226,7 +227,7 @@ impl Cli {
     }
 }
 
-fn all_equal(v: &[String]) -> bool {
+fn all_equal<T: Eq>(v: &[T]) -> bool {
     let first = v.first();
     if first.is_none() {
         return false;
