@@ -2,7 +2,7 @@
 
 One command to do a release.
 
-Currently version 0.3.0
+Currently version 0.3.1
 
 ## Install
 
