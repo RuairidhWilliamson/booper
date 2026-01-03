@@ -13,6 +13,8 @@
 //! Currently booper only checks `Cargo.toml` and `.env` but this is likely to expand in the future.
 
 use std::fmt::Write as _;
+use std::path::PathBuf;
+use std::process::Stdio;
 use std::{path::Path, str::FromStr};
 
 use clap::Parser;
@@ -119,17 +121,17 @@ impl Cli {
     #[expect(clippy::too_many_lines)]
     fn boop(&self) {
         assert_git_clean();
-        let re = Regex::new("((VERSION|version) ?= ?)\"([^\"]+)\"").unwrap();
+        let precise_regex = Regex::new("((VERSION|version) ?= ?)\"([^\"]+)\"").unwrap();
         let files = ["Cargo.toml", ".env"];
-        let (matching_files, versions): (Vec<&'static Path>, Vec<String>) = files
+        let versions: Vec<String> = files
             .into_iter()
             .map(Path::new)
             .filter_map(|file| {
                 let contents = std::fs::read_to_string(file).ok()?;
-                let cap = re.captures(&contents)?;
-                Some((file, cap.get(3)?.as_str().to_owned()))
+                let cap = precise_regex.captures(&contents)?;
+                Some(cap.get(3)?.as_str().to_owned())
             })
-            .unzip();
+            .collect();
         assert!(!versions.is_empty(), "no versions found");
         assert!(
             all_equal(&versions),
@@ -159,6 +161,31 @@ impl Cli {
             .unwrap_or_else(|| format!("v{to_version}"));
 
         eprintln!("Upgrading version {from_version} to {to_version}");
+
+        let loose_regex = regex::Regex::new(&format!(
+            "\\b{from_version}\\b",
+            from_version = regex::escape(&from_version.to_string())
+        ))
+        .unwrap();
+        let matching_files: Vec<PathBuf> = ignore::Walk::new(".")
+            .filter_map(|entry| {
+                let entry = entry.unwrap();
+                if entry.file_type().is_some_and(|e| e.is_file()) {
+                    let file = entry.path();
+                    if file.ends_with("Cargo.lock") {
+                        return None;
+                    }
+                    let contents = std::fs::read_to_string(file).ok()?;
+                    if loose_regex.is_match(&contents) {
+                        Some(file.to_path_buf())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
         let mut ops = Vec::new();
         if self.commit {
             ops.push("committed");
@@ -192,11 +219,10 @@ impl Cli {
             return;
         }
 
+        let to_version = to_version.to_string();
         for file in matching_files {
-            let contents = std::fs::read_to_string(file).unwrap();
-            let replaced_contents = re.replace(&contents, |caps: &Captures| {
-                format!("{}\"{}\"", &caps[1], to_version)
-            });
+            let contents = std::fs::read_to_string(&file).unwrap();
+            let replaced_contents = loose_regex.replace(&contents, |_: &Captures| &to_version);
             std::fs::write(file, replaced_contents.as_ref()).unwrap();
         }
 
@@ -254,7 +280,8 @@ fn cargo_check() {
 fn assert_git_clean() {
     assert!(
         std::process::Command::new("git")
-            .args(["diff", "--cached", "--exit-code"])
+            .args(["diff", "--exit-code"])
+            .stdout(Stdio::null())
             .status()
             .unwrap()
             .success(),

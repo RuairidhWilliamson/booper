@@ -2,6 +2,8 @@
 
 One command to do a release.
 
+Currently version 0.2.0
+
 ## Install
 
 ```bash
