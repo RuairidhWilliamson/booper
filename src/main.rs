@@ -196,16 +196,16 @@ impl Cli {
                 ops.push("pushed");
             }
         }
-        let ops_display;
-        if let Some(last) = ops.pop() {
-            ops_display = ops.iter().fold(String::new(), |mut output, x| {
+        let ops_display = if let Some(last) = ops.pop() {
+            let mut output = String::new();
+            for x in ops {
                 let _ = write!(output, ", {x}");
-                output
-            }) + " and "
-                + last;
+            }
+            let _ = write!(output, " and {last}");
+            output
         } else {
-            ops_display = String::new();
-        }
+            String::new()
+        };
         eprintln!("The following files will be changed{ops_display}:");
         for file in &matching_files {
             eprintln!("\t{}", file.display());
