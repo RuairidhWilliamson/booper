@@ -222,7 +222,7 @@ impl Cli {
         let to_version = to_version.to_string();
         for file in matching_files {
             let contents = std::fs::read_to_string(&file).unwrap();
-            let replaced_contents = loose_regex.replace(&contents, |_: &Captures| &to_version);
+            let replaced_contents = loose_regex.replace_all(&contents, |_: &Captures| &to_version);
             std::fs::write(file, replaced_contents.as_ref()).unwrap();
         }
 
