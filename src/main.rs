@@ -26,32 +26,6 @@ fn main() {
     cli.boop();
 }
 
-#[derive(Parser)]
-#[command(version, about)]
-struct Cli {
-    /// Can be one of `patch`, `minor`, `major`, `strip`, `pre` or an exact version e.g. `1.0.3`
-    ///
-    /// Defaults to `patch` or `strip` for prerelease
-    #[arg(default_value = "auto")]
-    increment: VersionIncrement,
-
-    /// Whether or not to commit the version changes
-    #[arg(short, long)]
-    commit: bool,
-
-    /// Whether or not to tag the commit. Requires -c / --commit
-    #[arg(short, long)]
-    tag: bool,
-
-    /// Whether or not to push the commit and tag. Requires -c / --commit
-    #[arg(short, long)]
-    push: bool,
-
-    /// Skips the interactive confirm step
-    #[arg(short = 'y', long)]
-    force: bool,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum VersionIncrement {
     Auto,
@@ -117,18 +91,61 @@ impl VersionIncrement {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileKind {
+    Precise,
+    Loose,
+    Skip,
+}
+
+impl FileKind {
+    fn new(path: &Path) -> Self {
+        match path.file_name().and_then(|name| name.to_str()) {
+            Some("Cargo.toml") => Self::Precise,
+            Some("Cargo.lock") => Self::Skip,
+            _ => Self::Loose,
+        }
+    }
+}
+
+#[derive(Parser)]
+#[command(version, about)]
+struct Cli {
+    /// Can be one of `patch`, `minor`, `major`, `strip`, `pre` or an exact version e.g. `1.0.3`
+    ///
+    /// Defaults to `patch` or `strip` for prerelease
+    #[arg(default_value = "auto")]
+    increment: VersionIncrement,
+
+    /// Whether or not to commit the version changes
+    #[arg(short, long)]
+    commit: bool,
+
+    /// Whether or not to tag the commit. Requires -c / --commit
+    #[arg(short, long)]
+    tag: bool,
+
+    /// Whether or not to push the commit and tag. Requires -c / --commit
+    #[arg(short, long)]
+    push: bool,
+
+    /// Skips the interactive confirm step
+    #[arg(short = 'y', long)]
+    force: bool,
+}
+
 impl Cli {
     #[expect(clippy::too_many_lines)]
     fn boop(&self) {
         assert_git_clean();
-        let precise_regex = Regex::new("((VERSION|version) ?= ?)\"([^\"]+)\"").unwrap();
+        let general_precise_regex = Regex::new("((VERSION|version) ?= ?)\"([^\"]+)\"").unwrap();
         let files = ["Cargo.toml", ".env"];
         let versions: Vec<String> = files
             .into_iter()
             .map(Path::new)
             .filter_map(|file| {
                 let contents = std::fs::read_to_string(file).ok()?;
-                let cap = precise_regex.captures(&contents)?;
+                let cap = general_precise_regex.captures(&contents)?;
                 Some(cap.get(3)?.as_str().to_owned())
             })
             .collect();
@@ -162,8 +179,13 @@ impl Cli {
 
         eprintln!("Upgrading version {from_version} to {to_version}");
 
+        let precise_regex = regex::Regex::new(&format!(
+            "((VERSION|version) ?= ?)\"(?<replace>{from_version})\"",
+            from_version = regex::escape(&from_version.to_string())
+        ))
+        .unwrap();
         let loose_regex = regex::Regex::new(&format!(
-            "\\b{from_version}\\b",
+            "\\b(?<replace>{from_version})\\b",
             from_version = regex::escape(&from_version.to_string())
         ))
         .unwrap();
@@ -172,11 +194,15 @@ impl Cli {
                 let entry = entry.unwrap();
                 if entry.file_type().is_some_and(|e| e.is_file()) {
                     let file = entry.path();
-                    if file.ends_with("Cargo.lock") {
-                        return None;
-                    }
+                    let regex = match FileKind::new(file) {
+                        FileKind::Precise => &precise_regex,
+                        FileKind::Loose => &loose_regex,
+                        FileKind::Skip => {
+                            return None;
+                        }
+                    };
                     let contents = std::fs::read_to_string(file).ok()?;
-                    if loose_regex.is_match(&contents) {
+                    if regex.is_match(&contents) {
                         Some(file.to_path_buf())
                     } else {
                         None
@@ -221,8 +247,17 @@ impl Cli {
 
         let to_version = to_version.to_string();
         for file in matching_files {
+            let regex = match FileKind::new(&file) {
+                FileKind::Precise => &precise_regex,
+                FileKind::Loose => &loose_regex,
+                FileKind::Skip => continue,
+            };
             let contents = std::fs::read_to_string(&file).unwrap();
-            let replaced_contents = loose_regex.replace_all(&contents, |_: &Captures| &to_version);
+            let replaced_contents = regex.replace_all(&contents, |caps: &Captures| {
+                caps.get_match()
+                    .as_str()
+                    .replace(caps.name("replace").unwrap().as_str(), &to_version)
+            });
             std::fs::write(file, replaced_contents.as_ref()).unwrap();
         }
 
