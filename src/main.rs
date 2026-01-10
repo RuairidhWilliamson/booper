@@ -135,9 +135,7 @@ struct Cli {
 }
 
 impl Cli {
-    #[expect(clippy::too_many_lines)]
-    fn boop(&self) -> Result<(), ()> {
-        assert_git_clean()?;
+    fn find_current_version() -> Result<Version, ()> {
         let general_precise_regex = Regex::new("((VERSION|version) ?= ?)\"([^\"]+)\"").unwrap();
         let files = ["Cargo.toml", ".env"];
         let versions: Vec<String> = files
@@ -155,6 +153,12 @@ impl Cli {
             &format!("no consistent version found: {versions:?}"),
         )?;
         let from_version = semver::Version::parse(&versions[0]).unwrap();
+        Ok(from_version)
+    }
+
+    fn boop(&self) -> Result<(), ()> {
+        assert_git_clean()?;
+        let from_version = Self::find_current_version()?;
         let last_tag = get_last_tag();
         if let Some(last_tag) = &last_tag {
             let stripped_last_tag = last_tag.strip_prefix('v').unwrap_or(last_tag);
@@ -168,15 +172,6 @@ impl Cli {
         }
         assert(from_version.build.is_empty(), "build suffix unsupported")?;
         let to_version = self.increment.increment(&from_version);
-        let to_version_tag = last_tag
-            .map(|last_tag| {
-                if last_tag.starts_with('v') {
-                    format!("v{to_version}")
-                } else {
-                    to_version.to_string()
-                }
-            })
-            .unwrap_or_else(|| format!("v{to_version}"));
 
         eprintln!("Upgrading version {from_version} to {to_version}");
 
@@ -190,29 +185,13 @@ impl Cli {
             from_version = regex::escape(&from_version.to_string())
         ))
         .unwrap();
-        let matching_files: Vec<PathBuf> = ignore::Walk::new(".")
-            .filter_map(|entry| {
-                let entry = entry.unwrap();
-                if entry.file_type().is_some_and(|e| e.is_file()) {
-                    let file = entry.path();
-                    let regex = match FileKind::new(file) {
-                        FileKind::Precise => &precise_regex,
-                        FileKind::Loose => &loose_regex,
-                        FileKind::Skip => {
-                            return None;
-                        }
-                    };
-                    let contents = std::fs::read_to_string(file).ok()?;
-                    if regex.is_match(&contents) {
-                        Some(file.to_path_buf())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let to_version = ToVersion {
+            string: to_version.to_string(),
+            precise_regex,
+            loose_regex,
+        };
+
+        let matching_files = to_version.find_files_to_update();
         let mut ops = Vec::new();
         if self.commit {
             ops.push("committed");
@@ -246,27 +225,25 @@ impl Cli {
             return Err(());
         }
 
-        let to_version = to_version.to_string();
-        for file in matching_files {
-            let regex = match FileKind::new(&file) {
-                FileKind::Precise => &precise_regex,
-                FileKind::Loose => &loose_regex,
-                FileKind::Skip => continue,
-            };
-            let contents = std::fs::read_to_string(&file).unwrap();
-            let replaced_contents = regex.replace_all(&contents, |caps: &Captures| {
-                caps.get_match()
-                    .as_str()
-                    .replace(caps.name("replace").unwrap().as_str(), &to_version)
-            });
-            std::fs::write(file, replaced_contents.as_ref()).unwrap();
-        }
+        to_version.update_files(&matching_files);
 
         cargo_check()?;
         eprintln!("Upgraded!");
+        self.git_operations(&to_version, last_tag)
+    }
 
+    fn git_operations(&self, to_version: &ToVersion, last_tag: Option<String>) -> Result<(), ()> {
+        let to_version_tag = last_tag
+            .map(|last_tag| {
+                if last_tag.starts_with('v') {
+                    format!("v{}", &to_version.string)
+                } else {
+                    to_version.string.clone()
+                }
+            })
+            .unwrap_or_else(|| format!("v{}", &to_version.string));
         if self.commit {
-            let msg = format!("Version {to_version}");
+            let msg = format!("Version {}", &to_version.string);
             commit(&msg)?;
             if self.push {
                 push()?;
@@ -281,12 +258,64 @@ impl Cli {
         } else {
             if self.tag {
                 eprintln!("Can't tag when -c / --commit is not enabled");
+                return Err(());
             }
             if self.push {
                 eprintln!("Can't push when -c / --commit is not enabled");
+                return Err(());
             }
         }
         Ok(())
+    }
+}
+
+struct ToVersion {
+    string: String,
+    precise_regex: Regex,
+    loose_regex: Regex,
+}
+
+impl ToVersion {
+    fn find_files_to_update(&self) -> Vec<PathBuf> {
+        ignore::Walk::new(".")
+            .filter_map(|entry| {
+                let entry = entry.unwrap();
+                if !entry.file_type()?.is_file() {
+                    return None;
+                }
+                let file = entry.path();
+                let regex = match FileKind::new(file) {
+                    FileKind::Precise => &self.precise_regex,
+                    FileKind::Loose => &self.loose_regex,
+                    FileKind::Skip => {
+                        return None;
+                    }
+                };
+                let contents = std::fs::read_to_string(file).ok()?;
+                if regex.is_match(&contents) {
+                    Some(file.to_path_buf())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn update_files(&self, matching_files: &[PathBuf]) {
+        for file in matching_files {
+            let regex = match FileKind::new(file) {
+                FileKind::Precise => &self.precise_regex,
+                FileKind::Loose => &self.loose_regex,
+                FileKind::Skip => continue,
+            };
+            let contents = std::fs::read_to_string(file).unwrap();
+            let replaced_contents = regex.replace_all(&contents, |caps: &Captures| {
+                caps.get_match()
+                    .as_str()
+                    .replace(caps.name("replace").unwrap().as_str(), &self.string)
+            });
+            std::fs::write(file, replaced_contents.as_ref()).unwrap();
+        }
     }
 }
 
