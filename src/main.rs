@@ -21,9 +21,9 @@ use clap::Parser;
 use regex::{Captures, Regex};
 use semver::Version;
 
-fn main() {
+fn main() -> Result<(), ()> {
     let cli = Cli::parse();
-    cli.boop();
+    cli.boop()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,8 +136,8 @@ struct Cli {
 
 impl Cli {
     #[expect(clippy::too_many_lines)]
-    fn boop(&self) {
-        assert_git_clean();
+    fn boop(&self) -> Result<(), ()> {
+        assert_git_clean()?;
         let general_precise_regex = Regex::new("((VERSION|version) ?= ?)\"([^\"]+)\"").unwrap();
         let files = ["Cargo.toml", ".env"];
         let versions: Vec<String> = files
@@ -149,11 +149,11 @@ impl Cli {
                 Some(cap.get(3)?.as_str().to_owned())
             })
             .collect();
-        assert!(!versions.is_empty(), "no versions found");
-        assert!(
+        assert(!versions.is_empty(), "no versions found")?;
+        assert(
             all_equal(&versions),
-            "no consistent version found: {versions:?}"
-        );
+            &format!("no consistent version found: {versions:?}"),
+        )?;
         let from_version = semver::Version::parse(&versions[0]).unwrap();
         let last_tag = get_last_tag();
         if let Some(last_tag) = &last_tag {
@@ -162,10 +162,11 @@ impl Cli {
                 && from_version.pre.is_empty()
                 && from_version != semver::Version::parse(stripped_last_tag).unwrap()
             {
-                panic!("last git tag does not match the detected tag");
+                eprintln!("last git tag does not match the detected tag");
+                return Err(());
             }
         }
-        assert!(from_version.build.is_empty(), "build suffix unsupported");
+        assert(from_version.build.is_empty(), "build suffix unsupported")?;
         let to_version = self.increment.increment(&from_version);
         let to_version_tag = last_tag
             .map(|last_tag| {
@@ -242,7 +243,7 @@ impl Cli {
                 .interact()
                 .unwrap()
         {
-            return;
+            return Err(());
         }
 
         let to_version = to_version.to_string();
@@ -261,20 +262,20 @@ impl Cli {
             std::fs::write(file, replaced_contents.as_ref()).unwrap();
         }
 
-        cargo_check();
+        cargo_check()?;
         eprintln!("Upgraded!");
 
         if self.commit {
             let msg = format!("Version {to_version}");
-            commit(&msg);
+            commit(&msg)?;
             if self.push {
-                push();
+                push()?;
             }
 
             if self.tag {
-                tag(&to_version_tag);
+                tag(&to_version_tag)?;
                 if self.push {
-                    push_tag(&to_version_tag);
+                    push_tag(&to_version_tag)?;
                 }
             }
         } else {
@@ -285,6 +286,7 @@ impl Cli {
                 eprintln!("Can't push when -c / --commit is not enabled");
             }
         }
+        Ok(())
     }
 }
 
@@ -301,19 +303,28 @@ fn all_equal<T: Eq>(v: &[T]) -> bool {
     true
 }
 
-fn cargo_check() {
-    assert!(
+fn assert(check: bool, err: &str) -> Result<(), ()> {
+    if check {
+        Ok(())
+    } else {
+        eprintln!("{err}");
+        Err(())
+    }
+}
+
+fn cargo_check() -> Result<(), ()> {
+    assert(
         std::process::Command::new("cargo")
             .args(["check", "-q"])
             .status()
             .unwrap()
             .success(),
-        "cargo check failed"
-    );
+        "cargo check failed",
+    )
 }
 
-fn assert_git_clean() {
-    assert!(
+fn assert_git_clean() -> Result<(), ()> {
+    assert(
         std::process::Command::new("git")
             .args(["diff", "--exit-code"])
             .stdout(Stdio::null())
@@ -321,51 +332,51 @@ fn assert_git_clean() {
             .unwrap()
             .success(),
         "uncommitted changes",
-    );
+    )
 }
 
-fn commit(message: &str) {
-    assert!(
+fn commit(message: &str) -> Result<(), ()> {
+    assert(
         std::process::Command::new("git")
             .args(["commit", "-am", message])
             .status()
             .unwrap()
             .success(),
-        "commit failed"
-    );
+        "commit failed",
+    )
 }
 
-fn push() {
-    assert!(
+fn push() -> Result<(), ()> {
+    assert(
         std::process::Command::new("git")
             .args(["push"])
             .status()
             .unwrap()
             .success(),
-        "push failed"
-    );
+        "push failed",
+    )
 }
 
-fn tag(tag: &str) {
-    assert!(
+fn tag(tag: &str) -> Result<(), ()> {
+    assert(
         std::process::Command::new("git")
             .args(["tag", tag])
             .status()
             .unwrap()
             .success(),
-        "tag failed"
-    );
+        "tag failed",
+    )
 }
 
-fn push_tag(tag: &str) {
-    assert!(
+fn push_tag(tag: &str) -> Result<(), ()> {
+    assert(
         std::process::Command::new("git")
             .args(["push", "origin", tag])
             .status()
             .unwrap()
             .success(),
-        "push tag failed"
-    );
+        "push tag failed",
+    )
 }
 
 fn get_last_tag() -> Option<String> {
